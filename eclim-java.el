@@ -442,7 +442,7 @@ matters for buffers containing non-ASCII characters)."
 imports section of a java source file. This will preserve the
 undo history."
   (interactive)
-  (flet ((cut-imports ()
+  (cl-flet ((cut-imports ()
                       (beginning-of-buffer)
                       (if (re-search-forward "^import" nil t)
                           (progn
@@ -511,7 +511,7 @@ implemnt/override, then inserts a skeleton for the chosen
 method."
   (interactive)
   (eclim/with-results response ("java_impl" "-p" "-f" "-o")
-    (flet ((join (glue items)
+    (cl-flet ((join (glue items)
                  (cond ((null items) "")
                        ((= 1 (length items)) (format "%s" (first items)))
                        (t (cl-reduce (lambda (a b) (format "%s%s%s" a glue b)) items))))
