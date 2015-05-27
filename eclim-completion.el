@@ -29,10 +29,6 @@
 ;;
 
 (require 'thingatpt)
-(eval-when-compile (require 'cl))
-(require 'cl-lib)
-(require 'eclim)
-(require 'eclim-java)
 
 (defun eclim--completion-candidate-type (candidate)
   "Returns the type of a candidate."
@@ -76,13 +72,10 @@
                (eclim/execute-command "c_complete" "-p" "-f" "-e" ("-l" "standard") "-o"))))
     (setq eclim--is-completing nil)))
 
-(defvar yas-minor-mode)
-(declare-function yas/expand-snippet "yasnippet")
-
 (defun eclim--completion-candidates-filter (c)
   (case major-mode
-    ((xml-mode nxml-mode) (or (cl-search "XML Schema" c)
-                              (cl-search "Namespace" c)))
+    ((xml-mode nxml-mode) (or (search "XML Schema" c)
+                              (search "Namespace" c)))
     (t nil)))
 
 (defun eclim--completion-candidate-menu-item (candidate)
@@ -96,7 +89,7 @@ in a completion menu."
   (with-no-warnings
     (remove-if #'eclim--completion-candidates-filter
                (mapcar #'eclim--completion-candidate-menu-item
-                       (eclim--complete)))))
+               (eclim--complete)))))
 
 (defun eclim--basic-complete-internal (completion-list)
   "Displays a buffer of basic completions."
@@ -148,7 +141,7 @@ buffer."
 (defun eclim--completion-yasnippet-convert (completion)
   "Convert a completion string to a yasnippet template"
   (apply #' concat
-            (cl-loop for c across (replace-regexp-in-string ", " "," completion)
+            (loop for c across (replace-regexp-in-string ", " "," completion)
                   collect (case c
                             (40 "(${")
                             (60 "<${")
@@ -241,7 +234,7 @@ documentation strings."
 (defun eclim--completion-documentation (symbol)
   "Looks up the documentation string for the given SYMBOL in the
 completion candidates list."
-  (let ((doc (assoc-default 'info (cl-find symbol eclim--completion-candidates :test #'string= :key #'eclim--completion-candidate-menu-item))))
+  (let ((doc (assoc-default 'info (find symbol eclim--completion-candidates :test #'string= :key #'eclim--completion-candidate-menu-item))))
     (when doc
       (eclim--render-doc doc))))
 

@@ -26,11 +26,11 @@
 ;;* Eclim Maven
 
 (require 'compile)
-(require 'eclim)
+
 ;; Add regexp to make compilation-mode understand maven2 errors
 (setq compilation-error-regexp-alist
       (append (list
-               '("^\\(.*\\):\\[\\([0-9]*\\),\\([0-9]*\\)\\]" 1 2 3))
+               '("\\[ERROR]\\ \/\\(.*\\):\\[\\([0-9]*\\),\\([0-9]*\\)]" 1 2 3))
               compilation-error-regexp-alist))
 
 (define-key eclim-mode-map (kbd "C-c C-e m p") 'eclim-maven-lifecycle-phase-run)

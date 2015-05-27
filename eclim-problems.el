@@ -1,8 +1,3 @@
-(require 'eclim)
-(require 'cl-lib)
-(require 'hl-line)
-(eval-when-compile (require 'cl))
-
 (defgroup eclim-problems nil
   "Problems: settings for displaying the problems buffer and highlighting errors in code."
   :group 'eclim)
@@ -54,7 +49,7 @@
 (defvar eclim--problems-project nil) ;; problems are relative to this project
 (defvar eclim--problems-file nil) ;; problems are relative to this file (when eclim--problems-filefilter is non-nil)
 
-(defvar eclim-problems-mode-map
+(setq eclim-problems-mode-map
       (let ((map (make-keymap)))
         (suppress-keymap map t)
         (define-key map (kbd "a") 'eclim-problems-show-all)
@@ -85,9 +80,9 @@
         mode-name "eclim/problems"
         mode-line-process ""
         truncate-lines t
-        line-move-visual nil
         buffer-read-only t
         default-directory (eclim/workspace-dir))
+  (setq-local line-move-visual nil)
   (setq mode-line-format
         (list "-"
               'mode-line-mule-info
@@ -140,11 +135,8 @@
   (interactive)
   (eclim--problems-apply-filter nil))
 
-(declare-function eclim--java-identifier-at-point "eclim-java")
-
 (defun eclim--problems-insert-highlight (problem)
   (save-excursion
-    (require 'eclim-java)
     (eclim--problem-goto-pos problem)
     (let* ((id (eclim--java-identifier-at-point t t))
            (start (car id))
@@ -166,7 +158,7 @@
     (save-restriction
       (widen)
       (eclim--problems-clear-highlights)
-      (cl-loop for problem across (cl-remove-if-not (lambda (p) (string= (assoc-default 'filename p) (file-truename (buffer-file-name)))) eclim--problems-list)
+      (loop for problem across (remove-if-not (lambda (p) (string= (assoc-default 'filename p) (buffer-file-name))) eclim--problems-list)
             do (eclim--problems-insert-highlight problem)))))
 
 (defadvice find-file (after eclim-problems-highlight-on-find-file activate)
@@ -192,35 +184,39 @@
         (widen)
         (let ((line (line-number-at-pos))
               (col (current-column)))
-          (or (cl-find-if (lambda (p) (and (string= (assoc-default 'filename p) (file-truename buffer-file-name))
+          (or (find-if (lambda (p) (and (string= (assoc-default 'filename p) (file-truename buffer-file-name))
                                         (= (assoc-default 'line p) line)))
                        eclim--problems-list)
               (error "No problem on this line")))))))
 
-(defun eclim-problems-open-current ()
+(defun eclim-problems-open-current (&optional same-window)
   (interactive)
   (let* ((p (eclim--problems-get-current-problem)))
-    (find-file-other-window (assoc-default 'filename p))
+    (funcall (if same-window
+         'find-file
+       'find-file-other-window)
+     (assoc-default 'filename p))
     (eclim--problem-goto-pos p)))
+
+(funcall (if t '+ '-) 1 2)
 
 (defun eclim-problems-correct ()
   (interactive)
   (let ((p (eclim--problems-get-current-problem)))
     (if (not (string-match "\\.\\(groovy\\|java\\)$" (cdr (assoc 'filename p))))
         (error "Not a Java or Groovy file. Corrections are currently supported only for Java or Groovy.")
-      (eclim-problems-open-current)
       (eclim-java-correct (cdr (assoc 'line p)) (eclim--byte-offset)))))
 
 (defmacro eclim--with-problems-list (problems &rest body)
   (declare (indent defun))
   "Utility macro to refresh the problem list and do operations on
 it asynchronously."
-  (let ((res (cl-gensym "eclim-problem-list")))
+  (let ((res (gensym)))
     `(when eclim--problems-project
        (when (not (minibuffer-window-active-p (minibuffer-window)))
          (message "refreshing... %s " (current-buffer)))
        (eclim/with-results-async ,res ("problems" ("-p" eclim--problems-project) (when (string= "e" eclim--problems-filter) '("-e" "true")))
-         (cl-loop for problem across ,res
+         (loop for problem across ,res
                do (let ((filecell (assq 'filename problem)))
                     (when filecell (setcdr filecell (file-truename (cdr filecell))))))
          (setq eclim--problems-list ,res)
@@ -236,10 +232,10 @@ it asynchronously."
         (if (string= "e" eclim--problems-filter)
             (message "Eclim reports %d errors." (length problems))
           (message "Eclim reports %d errors, %d warnings."
-                   (length (cl-remove-if-not (lambda (p) (not (eq t (assoc-default 'warning p)))) problems))
-                   (length (cl-remove-if-not (lambda (p) (eq t (assoc-default 'warning p))) problems)))))))
+                   (length (remove-if-not (lambda (p) (not (eq t (assoc-default 'warning p)))) problems))
+                   (length (remove-if-not (lambda (p) (eq t (assoc-default 'warning p))) problems)))))))
 
-(defun eclim--problems-cleanup-filename (filename problem)
+(defun eclim--problems-cleanup-filename (filename)
   (let ((x (file-name-nondirectory (assoc-default 'filename problem))))
     (if eclim-problems-show-file-extension x (file-name-sans-extension x))))
 
@@ -248,8 +244,7 @@ it asynchronously."
       (min 40
            (apply #'max 0
                   (mapcar (lambda (problem)
-                            (length (eclim--problems-cleanup-filename (assoc-default 'filename problem)
-								      problem)))
+                            (length (eclim--problems-cleanup-filename (assoc-default 'filename problem))))
                           (eclim--problems-filtered))))
     40))
 
@@ -277,12 +272,12 @@ it asynchronously."
               (line-number (line-number-at-pos))
               (filecol-size (eclim--problems-filecol-size)))
           (erase-buffer)
-          (cl-loop for problem across (eclim--problems-filtered)
+          (loop for problem across (eclim--problems-filtered)
                 do (eclim--insert-problem problem filecol-size))
           (goto-char (point-min))
           (forward-line (1- line-number)))))))
 
-(defun eclim--problems-filtered (&optional ignore-type-filter)
+(defun eclim--problems-filtered ()
   "Filter reported problems by eclim.
 
 It filters out problems using the ECLIM--PROBLEMS-FILEFILTER
@@ -291,21 +286,33 @@ are also filtered according to ECLIM--PROBLEMS-FILTER, i.e.,
 error type. Otherwise, error type is ignored. This is useful when
 other mechanisms, like compilation's mode
 COMPILATION-SKIP-THRESHOLD, implement this feature."
-  (cl-remove-if-not
-   (lambda (x) (and
-                (or (not eclim--problems-filefilter)
-                    (string= (assoc-default 'filename x) eclim--problems-file))
-                (or ignore-type-filter
-                    (not eclim--problems-filter)
-                    (and (string= "e" eclim--problems-filter)
-                         (not (eq t (assoc-default 'warning x))))
-                    (and (string= "w" eclim--problems-filter)
-                         (eq t (assoc-default 'warning x))))))
-   eclim--problems-list))
+  (eclim--filter-problems eclim--problems-filter eclim--problems-filefilter eclim--problems-file eclim--problems-list))
+
+(defun eclim--warning-filterp (x)
+  (eq t (assoc-default 'warning x)))
+
+(defun eclim--error-filterp (x)
+  (not (eclim--warning-filterp x)))
+
+(defun eclim--choose-type-filter (type-filter)
+  (cond
+   ((not type-filter) '(lambda (_) t))
+   ((string= "e" type-filter) 'eclim--error-filterp)
+   (t 'eclim--warning-filterp)))
+
+(defun eclim--choose-file-filter (file-filter file)
+  (if (not file-filter)
+      '(lambda (_) t)
+    '(lambda (x) (string= (assoc-default 'filename x) file))))
+
+(defun eclim--filter-problems (type-filter file-filter file problems)
+  (let ((type-filterp (eclim--choose-type-filter type-filter))
+        (file-filterp (eclim--choose-file-filter file-filter file)))
+    (remove-if-not (lambda (x) (and (funcall type-filterp x) (funcall file-filterp x))) problems)))
 
 (defun eclim--insert-problem (problem filecol-size)
   (let* ((filecol-format-string (concat "%-" (number-to-string filecol-size) "s"))
-         (problem-new-line-pos (cl-position ?\n (assoc-default 'message problem)))
+         (problem-new-line-pos (position ?\n (assoc-default 'message problem)))
          (problem-message
           (if problem-new-line-pos
               (concat (substring (assoc-default 'message problem)
@@ -313,8 +320,7 @@ COMPILATION-SKIP-THRESHOLD, implement this feature."
                       "...")
             (assoc-default 'message problem)))
          (filename (truncate-string-to-width
-                    (eclim--problems-cleanup-filename (assoc-default 'filename problem)
-						      problem)
+                    (eclim--problems-cleanup-filename (assoc-default 'filename problem))
                     40 0 nil t))
          (text (if eclim-problems-show-pos
                    (format (concat filecol-format-string
@@ -389,7 +395,7 @@ without switching to it."
     (with-current-buffer eclim--problems-buffer-name
       (eclim-problems-buffer-refresh))))
 
-(defun eclim-problems-next ()
+(defun eclim-problems-next (&optional same-window)
   (interactive)
   (let ((prob-buf (get-buffer eclim--problems-buffer-name)))
     (when prob-buf
@@ -398,16 +404,24 @@ without switching to it."
           (setq eclim--problems-list-at-first nil)
         (forward-line 1))
       (hl-line-move hl-line-overlay)
-      (eclim-problems-open-current))))
+      (eclim-problems-open-current same-window))))
 
-(defun eclim-problems-previous ()
+(defun eclim-problems-previous (&optional same-window)
   (interactive)
   (let ((prob-buf (get-buffer eclim--problems-buffer-name)))
     (when prob-buf
       (set-buffer prob-buf)
       (forward-line -1)
       (hl-line-move hl-line-overlay)
-      (eclim-problems-open-current))))
+      (eclim-problems-open-current same-window))))
+
+(defun eclim-problems-next-same-window ()
+  (interactive)
+  (eclim-problems-next t))
+
+(defun eclim-problems-previous-same-window ()
+  (interactive)
+  (eclim-problems-previous t))
 
 (defun eclim--problems-update-maybe ()
   "If autoupdate is enabled, this function triggers a delayed
@@ -454,5 +468,20 @@ is convenient as it lets the user navigate between errors using
     (let ((line (assoc-default 'line problem))
           (col (assoc-default 'column problem)))
       (insert (format "%s:%s:%s: %s: %s\n" filename line col (upcase type) description)))))
+
+(defun eclim--count-current-errors ()
+  (length
+   (eclim--filter-problems "e" t (buffer-file-name (current-buffer)) eclim--problems-list)))
+
+(defun eclim--count-current-warnings ()
+  (length
+   (eclim--filter-problems "w" t (buffer-file-name (current-buffer)) eclim--problems-list)))
+
+(defun eclim-problems-modeline-string ()
+  "Returns modeline string with additional info about
+problems for current file"
+  (concat (format " : %s/%s"
+                  (eclim--count-current-errors)
+                  (eclim--count-current-warnings))))
 
 (provide 'eclim-problems)

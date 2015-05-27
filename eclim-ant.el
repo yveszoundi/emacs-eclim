@@ -26,9 +26,6 @@
 
 ;;* Eclim Ant
 
-(require 'eclim)
-(require 'eclim-project)
-
 (define-key eclim-mode-map (kbd "C-c C-e a c") 'eclim-ant-clear-cache)
 (define-key eclim-mode-map (kbd "C-c C-e a r") 'eclim-ant-run)
 (define-key eclim-mode-map (kbd "C-c C-e a a") 'eclim-ant-run)
@@ -84,7 +81,7 @@ buildfile for the current project has changed and needs to be updated"
 
 (defun eclim-ant-validate (project file)
   "Run ant-xml validation against the file opened in the current
-buffer. The resulst are displayed in a deticated compilation buffer."
+buffer. The results are displayed in a dedicated compilation buffer."
   (interactive (list (eclim--project-name) (buffer-file-name)))
   (pop-to-buffer (get-buffer-create "*eclim: build*"))
   (let ((buffer-read-only nil))
@@ -92,7 +89,7 @@ buffer. The resulst are displayed in a deticated compilation buffer."
     (dolist (line (eclim/ant-validate project file))
       (insert (eclim--convert-find-result-to-string line))
       (newline)))
-  (goto-char (point-min))
+  (beginning-of-buffer)
   (compilation-mode))
 
 (defun eclim-ant-run (target)

@@ -28,14 +28,6 @@
 ;;* Eclim Java
 
 (require 'json)
-(require' eclim)
-(require 'eclim-project)
-(require 'eclim-problems)
-
-(declare-function yas/expand-snippet "yasnippet")
-(defvar eclim-corrections-previous-window-config nil)
-(defvar eclim-correction-command-info nil)
-(defvar eclim-java-show-documentation-history nil)
 
 (define-key eclim-mode-map (kbd "C-c C-e s") 'eclim-java-method-signature-at-point)
 (define-key eclim-mode-map (kbd "C-c C-e f d") 'eclim-java-find-declaration)
@@ -49,6 +41,7 @@
 (define-key eclim-mode-map (kbd "C-c C-e d") 'eclim-java-doc-comment)
 (define-key eclim-mode-map (kbd "C-c C-e f s") 'eclim-java-format)
 (define-key eclim-mode-map (kbd "C-c C-e g") 'eclim-java-generate-getter-and-setter)
+(define-key eclim-mode-map (kbd "C-c C-e t") 'eclim-run-junit)
 
 (defvar eclim-java-show-documentation-map
   (let ((map (make-keymap)))
@@ -109,23 +102,6 @@ Java documentation under Android docs, so don't forget to set
                                       "implementors"
                                       "references"))
 
-(defvar eclim-java-correct-map
-  (let ((map (make-keymap)))
-    (suppress-keymap map t)
-    (define-key map (kbd "q") 'eclim-java-correct-quit)
-    (define-key map (kbd "0") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "1") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "2") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "3") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "4") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "5") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "6") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "7") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "8") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "9") 'eclim-java-correct-choose-by-digit)
-    (define-key map (kbd "RET") 'eclim-java-correct-choose)
-    map))
-
 (defvar eclim--is-completing nil)
 
 (defun eclim/groovy-src-update (&optional save-others)
@@ -153,7 +129,7 @@ in eclim when appropriate."
         (fn nil))
     (ignore-errors
       (and (setq pr (eclim--project-name filename))
-           (setq fn (file-relative-name filename (eclim--project-dir filename)))))
+           (setq fn (file-relative-name filename (eclim--project-dir pr)))))
     ad-do-it
     (when (and pr fn)
       (ignore-errors (apply 'eclim--call-process (list "java_src_update" "-p" pr "-f" fn))))))
@@ -171,7 +147,7 @@ in eclim when appropriate."
              str)))))
 
 (defun eclim--java-parse-method-signature (signature)
-  (cl-flet ((parser3/parse-arg (arg)
+  (flet ((parser3/parse-arg (arg)
                             (let ((arg-rev (reverse arg)))
                               (cond ((null arg) nil)
                                     ((= (length arg) 1) (list (list :type (first arg))))
@@ -275,12 +251,12 @@ has been found."
     (eclim/with-results res ("java_refactor_rename" "-p" "-e" "-f" ("-n" n)
                              ("-o" (car i)) ("-l" (length (cdr i))))
       (if (stringp res) (error res))
-      (cl-loop for (from to) in (mapcar (lambda (x) (list (assoc-default 'from x) (assoc-default 'to x))) res)
+      (loop for (from to) in (mapcar (lambda (x) (list (assoc-default 'from x) (assoc-default 'to x))) res)
             do (when (and from to)
                  (kill-buffer (find-buffer-visiting from))
                  (find-file to)))
       (save-excursion
-        (cl-loop for file in (mapcar (lambda (x) (assoc-default 'file x)) res)
+        (loop for file in (mapcar (lambda (x) (assoc-default 'file x)) res)
               do (when file
                    (let ((buf (get-file-buffer (file-name-nondirectory file))))
                      (when buf
@@ -318,7 +294,7 @@ has been found."
                                         (eclim--visit-declaration position)))
         (insert declaration)))
     (newline)
-    (cl-loop for caller across (cdr (assoc 'callers node))
+    (loop for caller across (cdr (assoc 'callers node))
           do (eclim--java-insert-call-hierarchy-node project caller (1+ level)))))
 
 (defun eclim-java-hierarchy (project file offset encoding)
@@ -344,7 +320,7 @@ has been found."
   (eclim/with-results hits ("java_search" ("-p" (cdr (assoc 'qualified node))) ("-t" "type") ("-x" "declarations") ("-s" "workspace"))
     (add-to-list 'node `(file-path . ,(assoc-default 'message (elt hits 0))))
     (let ((children (cdr (assoc 'children node))))
-      (cl-loop for child across children do
+      (loop for child across children do
             (eclim--java-insert-file-path-for-hierarchy-nodes child)))
     node))
 
@@ -362,7 +338,7 @@ has been found."
         (insert declaration))))
   (newline)
   (let ((children (cdr (assoc 'children node))))
-    (cl-loop for child across children do
+    (loop for child across children do
           (eclim--java-insert-hierarchy-node project child (+ level 1)))))
 
 (defun eclim-java-find-declaration ()
@@ -370,6 +346,13 @@ has been found."
   (interactive)
   (let ((i (eclim--java-identifier-at-point t)))
     (eclim/with-results hits ("java_search" "-n" "-f" ("-o" (car i)) ("-l" (length (cdr i))) ("-x" "declaration"))
+      (eclim--find-display-results (cdr i) hits t))))
+
+(defun eclim-c-find-declaration ()
+  "Find and display the declaration of the c identifier at point."
+  (interactive)
+  (let ((i (eclim--java-identifier-at-point t)))
+    (eclim/with-results hits ("c_search" "-n" "-f" ("-o" (car i)) ("-l" (length (cdr i))))
       (eclim--find-display-results (cdr i) hits t))))
 
 (defun eclim-java-find-references ()
@@ -442,7 +425,7 @@ matters for buffers containing non-ASCII characters)."
 imports section of a java source file. This will preserve the
 undo history."
   (interactive)
-  (cl-flet ((cut-imports ()
+  (flet ((cut-imports ()
                       (beginning-of-buffer)
                       (if (re-search-forward "^import" nil t)
                           (progn
@@ -488,7 +471,7 @@ sorts import statements. "
   (interactive)
   (let ((revert-buffer-function 'eclim-soft-revert-imports))
     (eclim/with-results res ("java_import_organize" "-p" "-f" "-o" "-e"
-                             (when types (list "-t" (cl-reduce (lambda (a b) (concat a "," b)) types))))
+                             (when types (list "-t" (reduce (lambda (a b) (concat a "," b)) types))))
       (eclim--problems-update-maybe)
       (when (vectorp res)
         (save-excursion
@@ -498,7 +481,7 @@ sorts import statements. "
 (defun format-type (type)
   (cond ((null type) nil)
         ((listp (first type))
-         (append (list "<") (rest (cl-mapcan (lambda (type) (append (list ", ") (format-type type))) (first type))) (list ">")
+         (append (list "<") (rest (mapcan (lambda (type) (append (list ", ") (format-type type))) (first type))) (list ">")
                (format-type (rest type))))
         (t (cons (let ((type-name (symbol-name (first type))))
                    (when (string-match "\\(.*\\.\\)?\\(.*\\)" type-name)
@@ -511,14 +494,14 @@ implemnt/override, then inserts a skeleton for the chosen
 method."
   (interactive)
   (eclim/with-results response ("java_impl" "-p" "-f" "-o")
-    (cl-flet ((join (glue items)
+    (flet ((join (glue items)
                  (cond ((null items) "")
                        ((= 1 (length items)) (format "%s" (first items)))
-                       (t (cl-reduce (lambda (a b) (format "%s%s%s" a glue b)) items))))
+                       (t (reduce (lambda (a b) (format "%s%s%s" a glue b)) items))))
            (format-type (type)
                         (cond ((null type) nil)
                               ((listp (first type))
-                               (append (list "<") (rest (cl-mapcan (lambda (type) (append (list ", ") (format-type type))) (first type))) (list ">")
+                               (append (list "<") (rest (mapcan (lambda (type) (append (list ", ") (format-type type))) (first type))) (list ">")
                                        (format-type (rest type))))
                               (t (cons (let ((type-name (symbol-name (first type))))
                                          (when (string-match "\\(.*\\.\\)?\\(.*\\)" type-name)
@@ -527,7 +510,7 @@ method."
                                              (eclim-java-import (concat package class))
                                              class)))
                                        (format-type (rest type)))))))
-      (let* ((methods (cl-remove-if-not (lambda (m) (or (null name)
+      (let* ((methods (remove-if-not (lambda (m) (or (null name)
                                                      (string-match name m)))
                                      (mapcar (lambda (x) (replace-regexp-in-string "[ \n\t]+" " " x))
                                              (apply 'append
@@ -539,11 +522,11 @@ method."
              (ret (assoc-default :return sig)))
         (yas/expand-snippet (format "@Override\n%s %s(%s) {$0}"
                                     (apply #'concat
-                                           (join " " (cl-remove-if-not (lambda (m) (find m '(public protected private void))) (subseq ret 0 (1- (length ret)))))
+                                           (join " " (remove-if-not (lambda (m) (find m '(public protected private void))) (subseq ret 0 (1- (length ret)))))
                                            " "
-                                           (format-type (cl-remove-if (lambda (m) (find m '(abstract public protected private ))) ret)))
+                                           (format-type (remove-if (lambda (m) (find m '(abstract public protected private ))) ret)))
                                     (assoc-default :name sig)
-                                    (join ", " (cl-loop for arg in (cl-remove-if #'null (assoc-default :arglist sig))
+                                    (join ", " (loop for arg in (remove-if #'null (assoc-default :arglist sig))
                                                      for i from 0
                                                      collect (format "%s ${arg%s}" (apply #'concat (format-type (assoc-default :type arg))) i)))))))))
 
@@ -561,80 +544,47 @@ method."
     (compile (concat eclim-executable " -command java -p "  eclim--project-name
                      " -c " (eclim-package-and-class)))))
 
+(defun eclim-run-junit (project file offset encoding)
+  "Run the current JUnit class or method at point.
+
+This method hooks onto the running Eclipse process and is thus
+much faster than running mvn test -Dtest=TestClass#method."
+  (interactive (list (eclim--project-name)
+                     (eclim--project-current-file)
+                     (eclim--byte-offset)
+                     (eclim--current-encoding)))
+  (if (not (string= major-mode "java-mode"))
+      (message "Running JUnit tests only makes sense for Java buffers.")
+    (compile
+     (concat eclim-executable
+             " -command java_junit -p " project
+             " -f " file
+             " -o " (number-to-string offset)
+             " -e " encoding))))
+
 (defun eclim-java-correct (line offset)
-  "Must be called with the problematic file opened in the current buffer."
-  (message "Getting corrections...")
   (eclim/with-results correction-info ("java_correct" "-p" "-f" ("-l" line) ("-o" offset))
-    (let ((window-config (current-window-configuration))
-          (corrections (cdr (assoc 'corrections correction-info)))
-          (project (eclim--project-name))) ;; store project name before buffer change
-      (pop-to-buffer "*corrections*")
-      (erase-buffer)
-      (use-local-map eclim-java-correct-map)
-
-      (insert "Problem: " (cdr (assoc 'message correction-info)) "\n\n")
-      (if (eq (length corrections) 0)
-          (insert "No automatic corrections found. Sorry.")
-        (insert (substitute-command-keys
-                 (concat
-                  "Choose a correction by pressing \\[eclim-java-correct-choose]"
-                  " on it or typing its index. Press \\[eclim-java-correct-quit] to quit"))))
-      (insert "\n\n")
-
-      (dotimes (i (length corrections))
-        (let ((correction (aref corrections i)))
-          (insert "------------------------------------------------------------\n"
-                  "Correction "
-                  (int-to-string (cdr (assoc 'index correction)))
-                  ": " (cdr (assoc 'description correction)) "\n\n"
-                  "Preview:\n\n"
-                  (cdr (assoc 'preview correction))
-                  "\n\n")))
-      (goto-char (point-min))
-      (make-local-variable 'eclim-corrections-previous-window-config)
-      (setq eclim-corrections-previous-window-config window-config)
-      (make-local-variable 'eclim-correction-command-info)
-      (setq eclim-correction-command-info (list 'project project
-                                                'line line
-                                                'offset offset)))))
-
-(defun eclim-java-correct-choose (&optional index)
-  (interactive)
-  (save-excursion
-    (if index
-        (goto-char (point-max)))
-    (if (not (re-search-backward (concat "^Correction "
-                                         (if index
-                                             index
-                                           "\\([0-9]+\\)")
-                                         ":")
-                                 nil t))
-        (message (concat "No correction "
-                         (if index
-                             (format "with index %s." index)
-                           "here.")))
-      (unless index
-        (setq index (string-to-number (match-string 1))))
-      (let ((info eclim-correction-command-info))
-        (set-window-configuration eclim-corrections-previous-window-config)
-        (message "Applying correction %s" index)
-        (eclim/with-results correction-info ("java_correct"
-                                             ("-p" (plist-get info 'project))
-                                             "-f"
-                                             ("-l" (plist-get info 'line))
-                                             ("-o" (plist-get info 'offset))
-                                             ("-a" index))
-          (eclim--problems-update-maybe))))))
-
-(defun eclim-java-correct-choose-by-digit ()
-  (interactive)
-  (eclim-java-correct-choose (this-command-keys)))
-
-
-(defun eclim-java-correct-quit ()
-  (interactive)
-  (set-window-configuration eclim-corrections-previous-window-config))
-
+    (if (stringp correction-info)
+        (message correction-info)
+      (let ((corrections (cdr (assoc 'corrections correction-info))))
+        (if (eq (length corrections) 0)
+            (message "No automatic corrections found. Sorry."))
+        (setq-local cmenu
+                    (mapcar (lambda (correction)
+                              (popup-make-item
+                               (cdr (assoc 'description correction))
+                               :value (cdr (assoc 'index correction))
+                               :document (cdr (assoc 'preview correction))))
+                            corrections))
+        (let ((choice (popup-menu* cmenu)))
+          (when choice
+            (eclim/with-results correction-info
+              ("java_correct"
+               ("-p" eclim--project-name)
+               "-f"
+               ("-l" line)
+               ("-o" offset)
+               ("-a" choice)))))))))
 
 (defun eclim-java-show-documentation-for-current-element ()
   "Displays the doc comments for the element at the pointers position."
@@ -710,7 +660,7 @@ method."
           (let* ((doc-root-vars '(eclim-java-documentation-root
                                   eclim-java-android-documentation-root))
                  (path (replace-regexp-in-string "^[./]+" "" url))
-                 (fullpath (cl-some (lambda (var)
+                 (fullpath (some (lambda (var)
                                    (let ((fullpath (concat (symbol-value var)
                                                            "/"
                                                            path)))
@@ -738,6 +688,5 @@ method."
   (erase-buffer)
   (insert (pop eclim-java-show-documentation-history))
   (goto-char (point-min)))
-
 
 (provide 'eclim-java)
